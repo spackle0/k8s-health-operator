@@ -28,5 +28,10 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# other
+.claude
+.DS_STORE
+*.swp
