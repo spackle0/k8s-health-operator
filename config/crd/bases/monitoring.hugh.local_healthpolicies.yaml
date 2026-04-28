@@ -39,10 +39,17 @@ spec:
           spec:
             description: spec defines the desired state of HealthPolicy
             properties:
-              foo:
-                description: foo is an example field of HealthPolicy. Edit healthpolicy_types.go
-                  to remove/update
-                type: string
+              crashLoopThreshold:
+                default: 3
+                description: |-
+                  I put these so that we don't wind up with a zero in here and a default
+                  if this is omitted
+                minimum: 1
+                type: integer
+              namespaces:
+                items:
+                  type: string
+                type: array
             type: object
           status:
             description: status defines the observed state of HealthPolicy
@@ -115,6 +122,40 @@ spec:
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
+                x-kubernetes-list-type: map
+              findings:
+                description: This stuff will tell the K8s API server how to merge
+                  updates
+                items:
+                  properties:
+                    firstObservedTime:
+                      format: date-time
+                      type: string
+                    lastObservedTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    podRef:
+                      type: string
+                    ruleType:
+                      description: RuleType identifies a detection rule.
+                      enum:
+                      - CrashLoopDetection
+                      - OOMKillDetection
+                      - PendingPodDetection
+                      type: string
+                  required:
+                  - firstObservedTime
+                  - lastObservedTime
+                  - message
+                  - podRef
+                  - ruleType
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - podRef
+                - ruleType
                 x-kubernetes-list-type: map
             type: object
         required:

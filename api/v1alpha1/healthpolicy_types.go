@@ -20,8 +20,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// RuleType identifies a detection rule.
+// +kubebuilder:validation:Enum=CrashLoopDetection;OOMKillDetection;PendingPodDetection
+type RuleType string
+
+const (
+	RuleCrashLoop RuleType = "CrashLoopDetection"
+	RuleOOMKill   RuleType = "OOMKillDetection"
+	RulePending   RuleType = "PendingPodDetection"
+)
+
+type Finding struct {
+	PodRef            string      `json:"podRef"` // namespace/podname
+	FirstObservedTime metav1.Time `json:"firstObservedTime"`
+	LastObservedTime  metav1.Time `json:"lastObservedTime"`
+	RuleType          RuleType    `json:"ruleType"`
+	Message           string      `json:"message"`
+}
 
 // HealthPolicySpec defines the desired state of HealthPolicy
 type HealthPolicySpec struct {
@@ -30,9 +45,13 @@ type HealthPolicySpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	// foo is an example field of HealthPolicy. Edit healthpolicy_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Namespaces []string `json:"namespaces,omitempty"`
+
+	// I put these so that we don't wind up with a zero in here and a default
+	// if this is omitted
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	CrashLoopThreshold int `json:"crashLoopThreshold,omitempty"`
 }
 
 // HealthPolicyStatus defines the observed state of HealthPolicy.
@@ -56,6 +75,12 @@ type HealthPolicyStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// This stuff will tell the K8s API server how to merge updates
+	// +listType=map
+	// +listMapKey=podRef
+	// +listMapKey=ruleType
+	Findings []Finding `json:"findings,omitempty"`
 }
 
 // +kubebuilder:object:root=true
