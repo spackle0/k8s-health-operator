@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,9 +49,37 @@ type HealthPolicyReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
+	var policy monitoringv1alpha1.HealthPolicy
 
-	// TODO(user): your logic here
+	log.Info("Reconciling HealthPolicy")
+	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
+		// This is a briefer way to check if the resource is not found.
+		// The IgnoreNotFound function will return nil if the error is not a NotFound error.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	log.Info("Policy spec loaded",
+		"namespaces", policy.Spec.Namespaces,
+		"crashLoopThreshold", policy.Spec.CrashLoopThreshold,
+	)
+
+	// SetStatusCondition mutates the conditions slice in memory; it does
+	// not call the API server. The persisted change happens in
+	// Status().Update below.
+	meta.SetStatusCondition(&policy.Status.Conditions, metav1.Condition{
+		Type:    "Available",
+		Status:  metav1.ConditionTrue,
+		Reason:  "Reconciled",
+		Message: "Policy reconciled successfully",
+	})
+
+	// Use r.Status().Update (not r.Update) because spec and status are
+	// separate subresources with different RBAC. The controller has
+	// permission to write status; it intentionally does not touch spec.
+	if err := r.Status().Update(ctx, &policy); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
