@@ -8,4 +8,4 @@ metadata:
 spec:
   namespaces:
     - default
-  crashLoopThreshold: 5
+  crashLoopThreshold: 3

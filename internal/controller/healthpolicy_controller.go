@@ -18,7 +18,10 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +41,7 @@ type HealthPolicyReconciler struct {
 // +kubebuilder:rbac:groups=monitoring.hugh.local,resources=healthpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=monitoring.hugh.local,resources=healthpolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=monitoring.hugh.local,resources=healthpolicies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -49,6 +53,17 @@ type HealthPolicyReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Reconcile flow:
+	// 1. Read inputs
+	//    - r.Get the policy             (already there)
+	//    - r.List pods in each ns       (new: this is the chunk you're adding)
+	//
+	// 2. Compute / mutate in memory
+	//    - Build findings from the pod list (later, not yet)
+	//    - SetStatusCondition           (already there)
+	//
+	// 3. Persist the result
+	//    - Status().Update              (already there, stays at the bottom)
 	log := logf.FromContext(ctx)
 	var policy monitoringv1alpha1.HealthPolicy
 
@@ -63,6 +78,43 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		"namespaces", policy.Spec.Namespaces,
 		"crashLoopThreshold", policy.Spec.CrashLoopThreshold,
 	)
+
+	var findings []monitoringv1alpha1.Finding
+	now := metav1.Now()
+	for _, ns := range policy.Spec.Namespaces {
+		var podList corev1.PodList
+		// client.InNamespace is not a function call returning data. It returns
+		// a value of type client.ListOption (which is itself an interface).
+		if err := r.List(ctx, &podList, client.InNamespace(ns)); err != nil {
+			return ctrl.Result{}, err
+		}
+		log.Info("Pods listed", "podNamespace", ns, "count", len(podList.Items))
+
+		for _, pod := range podList.Items {
+			for _, cs := range pod.Status.ContainerStatuses {
+				// RestartCount is int32 (Kubernetes API uses sized ints).
+				// CrashLoopThreshold is int. Go won't let you compare int32
+				// against int directly.
+				if int(cs.RestartCount) >= policy.Spec.CrashLoopThreshold {
+					findings = append(findings, monitoringv1alpha1.Finding{
+						PodRef:            fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+						FirstObservedTime: now,
+						LastObservedTime:  now,
+						RuleType:          monitoringv1alpha1.RuleCrashLoop,
+						Message:           fmt.Sprintf("Container %s restarted %d times", cs.Name, cs.RestartCount),
+					})
+					log.Info("Crash loop detected",
+						"pod", pod.Name,
+						"podNamespace", pod.Namespace,
+						"container", cs.Name,
+						"restartCount", cs.RestartCount,
+					)
+				}
+			}
+		}
+	}
+
+	policy.Status.Findings = findings
 
 	// SetStatusCondition mutates the conditions slice in memory; it does
 	// not call the API server. The persisted change happens in
@@ -81,7 +133,15 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	// Don't add RequeueAfter to any of the error returns. Here's why:
+	//
+	// - Returning a non-nil error already tells controller-runtime to requeue with
+	// exponential backoff (starting at ~5ms, capping at ~16min). So errors get
+	// retried automatically.
+	// - The not-found return (client.IgnoreNotFound returns nil) means the policy
+	// was deleted. There's nothing to requeue, there's no object to come back to.
+	// - Adding RequeueAfter to error returns would conflict with the backoff logic.
+	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
