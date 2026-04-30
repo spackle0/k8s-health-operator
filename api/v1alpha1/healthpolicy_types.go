@@ -47,11 +47,14 @@ type HealthPolicySpec struct {
 
 	Namespaces []string `json:"namespaces,omitempty"`
 
-	// I put these so that we don't wind up with a zero in here and a default
-	// if this is omitted
+	// Max restarts before it comes up as a finding
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=1
 	CrashLoopThreshold int `json:"crashLoopThreshold,omitempty"`
+
+	// How often to wait in the queue before the next check
+	// +kubebuilder:default="30s"
+	ReportingInterval metav1.Duration `json:"reportingInterval,omitempty"`
 }
 
 // HealthPolicyStatus defines the observed state of HealthPolicy.
@@ -76,7 +79,7 @@ type HealthPolicyStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// This stuff will tell the K8s API server how to merge updates
+	// A list of findings keyed on podRef and ruleType
 	// +listType=map
 	// +listMapKey=podRef
 	// +listMapKey=ruleType

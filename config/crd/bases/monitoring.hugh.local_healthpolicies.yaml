@@ -41,15 +41,17 @@ spec:
             properties:
               crashLoopThreshold:
                 default: 3
-                description: |-
-                  I put these so that we don't wind up with a zero in here and a default
-                  if this is omitted
+                description: Max restarts before it comes up as a finding
                 minimum: 1
                 type: integer
               namespaces:
                 items:
                   type: string
                 type: array
+              reportingInterval:
+                default: 30s
+                description: How often to wait in the queue before the next check
+                type: string
             type: object
           status:
             description: status defines the observed state of HealthPolicy
@@ -124,8 +126,7 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               findings:
-                description: This stuff will tell the K8s API server how to merge
-                  updates
+                description: A list of findings keyed on podRef and ruleType
                 items:
                   properties:
                     firstObservedTime:

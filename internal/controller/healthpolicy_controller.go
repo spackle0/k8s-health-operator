@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -65,6 +64,7 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// 3. Persist the result
 	//    - Status().Update              (already there, stays at the bottom)
 	log := logf.FromContext(ctx)
+
 	var policy monitoringv1alpha1.HealthPolicy
 
 	log.Info("Reconciling HealthPolicy")
@@ -78,6 +78,18 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		"namespaces", policy.Spec.Namespaces,
 		"crashLoopThreshold", policy.Spec.CrashLoopThreshold,
 	)
+
+	// This is so that we can preserve the time of the first occurrence of a finding
+	type findingKey struct {
+		podRef   string
+		ruleType monitoringv1alpha1.RuleType
+	}
+
+	// Let's populate the loop map of the findings from the existing one
+	priorByKey := make(map[findingKey]monitoringv1alpha1.Finding, len(policy.Status.Findings))
+	for _, f := range policy.Status.Findings {
+		priorByKey[findingKey{podRef: f.PodRef, ruleType: f.RuleType}] = f
+	}
 
 	var findings []monitoringv1alpha1.Finding
 	now := metav1.Now()
@@ -96,9 +108,16 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				// CrashLoopThreshold is int. Go won't let you compare int32
 				// against int directly.
 				if int(cs.RestartCount) >= policy.Spec.CrashLoopThreshold {
+					podRef := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+
+					key := findingKey{podRef: podRef, ruleType: monitoringv1alpha1.RuleCrashLoop}
+					firstObserved := now
+					if prior, ok := priorByKey[key]; ok {
+						firstObserved = prior.FirstObservedTime
+					}
 					findings = append(findings, monitoringv1alpha1.Finding{
-						PodRef:            fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
-						FirstObservedTime: now,
+						PodRef:            podRef,
+						FirstObservedTime: firstObserved,
 						LastObservedTime:  now,
 						RuleType:          monitoringv1alpha1.RuleCrashLoop,
 						Message:           fmt.Sprintf("Container %s restarted %d times", cs.Name, cs.RestartCount),
@@ -133,7 +152,7 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	// Don't add RequeueAfter to any of the error returns. Here's why:
+	// Don't add RequeueAfter to any of the error returns above. Here's why:
 	//
 	// - Returning a non-nil error already tells controller-runtime to requeue with
 	// exponential backoff (starting at ~5ms, capping at ~16min). So errors get
@@ -141,7 +160,7 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// - The not-found return (client.IgnoreNotFound returns nil) means the policy
 	// was deleted. There's nothing to requeue, there's no object to come back to.
 	// - Adding RequeueAfter to error returns would conflict with the backoff logic.
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: policy.Spec.ReportingInterval.Duration}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
