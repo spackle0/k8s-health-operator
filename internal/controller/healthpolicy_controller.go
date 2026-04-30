@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -93,6 +92,23 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	var findings []monitoringv1alpha1.Finding
 	now := metav1.Now()
+
+	// This is a closure that adds a finding
+	addFinding := func(f monitoringv1alpha1.Finding) {
+		f.LastObservedTime = now
+		f.FirstObservedTime = now
+		if prior, ok := priorByKey[findingKey{podRef: f.PodRef, ruleType: f.RuleType}]; ok {
+			f.FirstObservedTime = prior.FirstObservedTime
+		}
+		findings = append(findings, f)
+		log.Info("Finding recorded",
+			"ruleType", f.RuleType,
+			"podRef", f.PodRef,
+			"message", f.Message,
+		)
+	}
+
+	// Loop through chosen namespaces
 	for _, ns := range policy.Spec.Namespaces {
 		var podList corev1.PodList
 		// client.InNamespace is not a function call returning data. It returns
@@ -102,32 +118,14 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		log.Info("Pods listed", "podNamespace", ns, "count", len(podList.Items))
 
+		// Check all the pods in the Namespace for different error conditions
 		for _, pod := range podList.Items {
 			for _, cs := range pod.Status.ContainerStatuses {
-				// RestartCount is int32 (Kubernetes API uses sized ints).
-				// CrashLoopThreshold is int. Go won't let you compare int32
-				// against int directly.
-				if int(cs.RestartCount) >= policy.Spec.CrashLoopThreshold {
-					podRef := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-
-					key := findingKey{podRef: podRef, ruleType: monitoringv1alpha1.RuleCrashLoop}
-					firstObserved := now
-					if prior, ok := priorByKey[key]; ok {
-						firstObserved = prior.FirstObservedTime
-					}
-					findings = append(findings, monitoringv1alpha1.Finding{
-						PodRef:            podRef,
-						FirstObservedTime: firstObserved,
-						LastObservedTime:  now,
-						RuleType:          monitoringv1alpha1.RuleCrashLoop,
-						Message:           fmt.Sprintf("Container %s restarted %d times", cs.Name, cs.RestartCount),
-					})
-					log.Info("Crash loop detected",
-						"pod", pod.Name,
-						"podNamespace", pod.Namespace,
-						"container", cs.Name,
-						"restartCount", cs.RestartCount,
-					)
+				if f, ok := evaluateCrashLoop(pod, cs, policy.Spec.CrashLoopThreshold); ok {
+					addFinding(f)
+				}
+				if f, ok := evaluateOOMKill(pod, cs); ok {
+					addFinding(f)
 				}
 			}
 		}

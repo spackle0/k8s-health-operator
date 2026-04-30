@@ -9,3 +9,4 @@ spec:
   namespaces:
     - default
   crashLoopThreshold: 3
+  reportingInterval: 30s
