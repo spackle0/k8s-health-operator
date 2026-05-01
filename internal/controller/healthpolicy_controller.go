@@ -120,6 +120,13 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		// Check all the pods in the Namespace for different error conditions
 		for _, pod := range podList.Items {
+
+			// Per-pod evaluators
+			if f, ok := evaluatePending(pod, policy.Spec.PendingPodThreshold.Duration, now.Time); ok {
+				addFinding(f)
+			}
+
+			// Per container evaluators
 			for _, cs := range pod.Status.ContainerStatuses {
 				if f, ok := evaluateCrashLoop(pod, cs, policy.Spec.CrashLoopThreshold); ok {
 					addFinding(f)

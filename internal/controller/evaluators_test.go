@@ -2,6 +2,7 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	monitoringv1alpha1 "github.com/spackle0/k8s-health-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -98,4 +99,72 @@ func TestEvaluateOOMKill(t *testing.T) {
 			}
 		})
 	}
+}
+func TestEvaluatePending(t *testing.T) {
+	created := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name      string
+		phase     corev1.PodPhase
+		age       time.Duration
+		threshold time.Duration
+		wantOK    bool
+	}{
+		{
+			name:      "pending past threshold",
+			phase:     corev1.PodPending,
+			age:       7 * time.Minute,
+			threshold: 5 * time.Minute,
+			wantOK:    true,
+		},
+		{
+			name:      "pending below threshold",
+			phase:     corev1.PodPending,
+			age:       2 * time.Minute,
+			threshold: 5 * time.Minute,
+			wantOK:    false,
+		},
+		{
+			name:      "pending at threshold",
+			phase:     corev1.PodPending,
+			age:       5 * time.Minute,
+			threshold: 5 * time.Minute,
+			wantOK:    true,
+		},
+		{
+			name:      "running",
+			phase:     corev1.PodRunning,
+			age:       7 * time.Minute,
+			threshold: 5 * time.Minute,
+			wantOK:    false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "demo",
+					Namespace:         "default",
+					CreationTimestamp: metav1.Time{Time: created},
+				},
+				Status: corev1.PodStatus{Phase: tc.phase},
+			}
+			now := created.Add(tc.age)
+
+			got, ok := evaluatePending(pod, tc.threshold, now)
+			if ok != tc.wantOK {
+				t.Errorf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok {
+				if got.RuleType != monitoringv1alpha1.RulePending {
+					t.Errorf("RuleType = %q, want %q", got.RuleType, monitoringv1alpha1.RulePending)
+				}
+				if got.PodRef != "default/demo" {
+					t.Errorf("PodRef = %q, want %q", got.PodRef, "default/demo")
+				}
+			}
+		})
+	}
+
 }

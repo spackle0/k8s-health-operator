@@ -55,6 +55,10 @@ type HealthPolicySpec struct {
 	// How often to wait in the queue before the next check
 	// +kubebuilder:default="30s"
 	ReportingInterval metav1.Duration `json:"reportingInterval,omitempty"`
+
+	// Max time for a pod to be in Pending state before it becomes a finding
+	// +kubebuilder:default="5m"
+	PendingPodThreshold metav1.Duration `json:"pendingPodThreshold,omitempty"`
 }
 
 // HealthPolicyStatus defines the observed state of HealthPolicy.

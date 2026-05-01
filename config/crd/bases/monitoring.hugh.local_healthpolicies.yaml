@@ -48,6 +48,11 @@ spec:
                 items:
                   type: string
                 type: array
+              pendingPodThreshold:
+                default: 5m
+                description: Max time for a pod to be in Pending state before it becomes
+                  a finding
+                type: string
               reportingInterval:
                 default: 30s
                 description: How often to wait in the queue before the next check
