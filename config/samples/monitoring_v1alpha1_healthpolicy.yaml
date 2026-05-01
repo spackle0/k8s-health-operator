@@ -6,4 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: healthpolicy-sample
 spec:
-  # TODO(user): Add fields here
+  namespaces:
+    - default
+  crashLoopThreshold: 3
+  reportingInterval: 30s
+  pendingPodThreshold: 2m

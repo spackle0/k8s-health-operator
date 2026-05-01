@@ -39,9 +39,23 @@ spec:
           spec:
             description: spec defines the desired state of HealthPolicy
             properties:
-              foo:
-                description: foo is an example field of HealthPolicy. Edit healthpolicy_types.go
-                  to remove/update
+              crashLoopThreshold:
+                default: 3
+                description: Max restarts before it comes up as a finding
+                minimum: 1
+                type: integer
+              namespaces:
+                items:
+                  type: string
+                type: array
+              pendingPodThreshold:
+                default: 5m
+                description: Max time for a pod to be in Pending state before it becomes
+                  a finding
+                type: string
+              reportingInterval:
+                default: 30s
+                description: How often to wait in the queue before the next check
                 type: string
             type: object
           status:
@@ -115,6 +129,39 @@ spec:
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
+                x-kubernetes-list-type: map
+              findings:
+                description: A list of findings keyed on podRef and ruleType
+                items:
+                  properties:
+                    firstObservedTime:
+                      format: date-time
+                      type: string
+                    lastObservedTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    podRef:
+                      type: string
+                    ruleType:
+                      description: RuleType identifies a detection rule.
+                      enum:
+                      - CrashLoopDetection
+                      - OOMKillDetection
+                      - PendingPodDetection
+                      type: string
+                  required:
+                  - firstObservedTime
+                  - lastObservedTime
+                  - message
+                  - podRef
+                  - ruleType
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - podRef
+                - ruleType
                 x-kubernetes-list-type: map
             type: object
         required:
