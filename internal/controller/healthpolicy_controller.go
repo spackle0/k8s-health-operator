@@ -24,8 +24,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	monitoringv1alpha1 "github.com/spackle0/k8s-health-operator/api/v1alpha1"
 )
@@ -34,6 +38,33 @@ import (
 type HealthPolicyReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
+
+// Scan for pods in namespaces mentioned in health policies and reconcile those policies against those pods
+func (r *HealthPolicyReconciler) podToHealthPolicies(ctx context.Context, obj client.Object) []reconcile.Request {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil
+	}
+
+	var policies monitoringv1alpha1.HealthPolicyList
+	if err := r.List(ctx, &policies); err != nil {
+		// need logging here
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, policy := range policies.Items {
+		for _, ns := range policy.Spec.Namespaces {
+			if ns == pod.Namespace {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: client.ObjectKeyFromObject(&policy),
+				})
+				break // a pod's namespace can match a policy at most once
+			}
+		}
+	}
+	return requests
 }
 
 // +kubebuilder:rbac:groups=monitoring.hugh.local,resources=healthpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -158,7 +189,6 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Don't add RequeueAfter to any of the error returns above. Here's why:
-	//
 	// - Returning a non-nil error already tells controller-runtime to requeue with
 	// exponential backoff (starting at ~5ms, capping at ~16min). So errors get
 	// retried automatically.
@@ -170,8 +200,19 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *HealthPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Watches sets up a secondary watch on Pod so kubelet-published changes
+	// (restart counts, OOMKilled terminations, Phase transitions) trigger
+	// reconciles immediately instead of waiting for the periodic timer.
+	//
+	// The predicate on For() filters out HealthPolicy events that don't
+	// change spec - status writes from this controller and inert metadata
+	// edits (labels, annotations). Spec changes still pass through.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&monitoringv1alpha1.HealthPolicy{}).
+		For(&monitoringv1alpha1.HealthPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(r.podToHealthPolicies),
+		).
 		Named("healthpolicy").
 		Complete(r)
 }
