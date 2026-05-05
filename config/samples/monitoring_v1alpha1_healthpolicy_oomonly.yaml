@@ -1,0 +1,13 @@
+apiVersion: monitoring.hugh.local/v1alpha1
+kind: HealthPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: k8s-health-operator
+  name: healthpolicy-oom-only
+spec:
+  namespaces:
+    - default
+  reportingInterval: 30s
+  rules:
+    - type: OOMKillDetection
