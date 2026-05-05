@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -106,8 +107,35 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	log.Info("Policy spec loaded",
 		"namespaces", policy.Spec.Namespaces,
-		"crashLoopThreshold", policy.Spec.CrashLoopThreshold,
+		"rules", policy.Spec.Rules,
 	)
+
+	// Decide which rules are enabled and pull their configs once,
+	// instead of re-walking policy.Spec.Rules on every pod.
+	var (
+		crashLoopCfg *monitoringv1alpha1.CrashLoopConfig
+		pendingCfg   *monitoringv1alpha1.PendingPodConfig
+		oomKillOn    bool
+	)
+
+	for _, rule := range policy.Spec.Rules {
+		switch rule.Type {
+		case monitoringv1alpha1.RuleCrashLoop:
+			crashLoopCfg = rule.CrashLoop
+			if crashLoopCfg == nil {
+				crashLoopCfg = &monitoringv1alpha1.CrashLoopConfig{Threshold: 3}
+			}
+		case monitoringv1alpha1.RulePending:
+			pendingCfg = rule.PendingPod
+			if pendingCfg == nil {
+				pendingCfg = &monitoringv1alpha1.PendingPodConfig{
+					Threshold: metav1.Duration{Duration: 5 * time.Minute},
+				}
+			}
+		case monitoringv1alpha1.RuleOOMKill:
+			oomKillOn = true
+		}
+	}
 
 	// This is so that we can preserve the time of the first occurrence of a finding
 	type findingKey struct {
@@ -153,17 +181,23 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		for _, pod := range podList.Items {
 
 			// Per-pod evaluators
-			if f, ok := evaluatePending(pod, policy.Spec.PendingPodThreshold.Duration, now.Time); ok {
-				addFinding(f)
-			}
-
-			// Per container evaluators
-			for _, cs := range pod.Status.ContainerStatuses {
-				if f, ok := evaluateCrashLoop(pod, cs, policy.Spec.CrashLoopThreshold); ok {
+			if pendingCfg != nil {
+				if f, ok := evaluatePending(pod, pendingCfg.Threshold.Duration, now.Time); ok {
 					addFinding(f)
 				}
-				if f, ok := evaluateOOMKill(pod, cs); ok {
-					addFinding(f)
+			}
+
+			// Per-container evaluators
+			for _, cs := range pod.Status.ContainerStatuses {
+				if crashLoopCfg != nil {
+					if f, ok := evaluateCrashLoop(pod, cs, crashLoopCfg.Threshold); ok {
+						addFinding(f)
+					}
+				}
+				if oomKillOn {
+					if f, ok := evaluateOOMKill(pod, cs); ok {
+						addFinding(f)
+					}
 				}
 			}
 		}

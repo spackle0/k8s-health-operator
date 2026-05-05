@@ -39,24 +39,52 @@ spec:
           spec:
             description: spec defines the desired state of HealthPolicy
             properties:
-              crashLoopThreshold:
-                default: 3
-                description: Max restarts before it comes up as a finding
-                minimum: 1
-                type: integer
               namespaces:
                 items:
                   type: string
                 type: array
-              pendingPodThreshold:
-                default: 5m
-                description: Max time for a pod to be in Pending state before it becomes
-                  a finding
-                type: string
               reportingInterval:
                 default: 30s
                 description: How often to wait in the queue before the next check
                 type: string
+              rules:
+                description: Rules select which detection rules apply to this policy
+                items:
+                  properties:
+                    crashLoop:
+                      description: CrashLoop holds configuration when Type is CrashLoopDetection
+                      properties:
+                        threshold:
+                          default: 3
+                          minimum: 1
+                          type: integer
+                      type: object
+                    pendingPod:
+                      description: PendingPod holds configuration when Type is PendingPodDetection
+                      properties:
+                        threshold:
+                          default: 5m
+                          type: string
+                      type: object
+                    type:
+                      allOf:
+                      - enum:
+                        - CrashLoopDetection
+                        - OOMKillDetection
+                        - PendingPodDetection
+                      - enum:
+                        - CrashLoopDetection
+                        - OOMKillDetection
+                        - PendingPodDetection
+                      description: Type identifies which rule this entry configures.
+                      type: string
+                  required:
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
             type: object
           status:
             description: status defines the observed state of HealthPolicy
