@@ -2,12 +2,18 @@ apiVersion: monitoring.hugh.local/v1alpha1
 kind: HealthPolicy
 metadata:
   labels:
-    app.kubernetes.io/name: k8s-health-operator
     app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: k8s-health-operator
   name: healthpolicy-sample
 spec:
   namespaces:
     - default
-  crashLoopThreshold: 3
   reportingInterval: 30s
-  pendingPodThreshold: 2m
+  rules:
+    - type: CrashLoopDetection
+      crashLoop:
+        threshold: 3
+    - type: OOMKillDetection
+    - type: PendingPodDetection
+      pendingPod:
+        threshold: 5m

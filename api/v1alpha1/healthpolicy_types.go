@@ -47,18 +47,14 @@ type HealthPolicySpec struct {
 
 	Namespaces []string `json:"namespaces,omitempty"`
 
-	// Max restarts before it comes up as a finding
-	// +kubebuilder:default=3
-	// +kubebuilder:validation:Minimum=1
-	CrashLoopThreshold int `json:"crashLoopThreshold,omitempty"`
-
 	// How often to wait in the queue before the next check
 	// +kubebuilder:default="30s"
 	ReportingInterval metav1.Duration `json:"reportingInterval,omitempty"`
 
-	// Max time for a pod to be in Pending state before it becomes a finding
-	// +kubebuilder:default="5m"
-	PendingPodThreshold metav1.Duration `json:"pendingPodThreshold,omitempty"`
+	// Rules select which detection rules apply to this policy
+	// +listType=map
+	// +listMapKey=type
+	Rules []RuleSpec `json:"rules,omitempty"`
 }
 
 // HealthPolicyStatus defines the observed state of HealthPolicy.
@@ -117,6 +113,34 @@ type HealthPolicyList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []HealthPolicy `json:"items"`
+}
+
+type RuleSpec struct {
+	// Type identifies which rule this entry configures.
+	// +kubebuilder:validation:Enum=CrashLoopDetection;OOMKillDetection;PendingPodDetection
+	Type RuleType `json:"type"`
+
+	// CrashLoop holds configuration when Type is CrashLoopDetection
+	// +optional
+	CrashLoop *CrashLoopConfig `json:"crashLoop,omitempty"`
+
+	// PendingPod holds configuration when Type is PendingPodDetection
+	// +optional
+	PendingPod *PendingPodConfig `json:"pendingPod,omitempty"`
+
+	// OOMKillDetection has no per-rule config (yet) and intentionally has
+	// no nested struct here.
+}
+
+type CrashLoopConfig struct {
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=1
+	Threshold int `json:"threshold,omitempty"`
+}
+
+type PendingPodConfig struct {
+	// +kubebuilder:default="5m"
+	Threshold metav1.Duration `json:"threshold,omitempty"`
 }
 
 func init() {
