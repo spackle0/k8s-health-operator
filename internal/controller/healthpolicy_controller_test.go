@@ -150,4 +150,78 @@ var _ = Describe("HealthPolicy Controller", func() {
 			Expect(updated.Status.Findings).To(BeEmpty())
 		})
 	})
+	Context("When the policy has no CrashLoopDetection rule", func() {
+		const (
+			policyName = "test-oomonly-policy"
+			podName    = "test-crashy-no-rule"
+			namespace  = "default"
+		)
+
+		BeforeEach(func() {
+			By("creating a HealthPolicy with only OOMKillDetection")
+			policy := &monitoringv1alpha1.HealthPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      policyName,
+					Namespace: namespace,
+				},
+				Spec: monitoringv1alpha1.HealthPolicySpec{
+					Namespaces:        []string{namespace},
+					ReportingInterval: metav1.Duration{Duration: 30 * time.Second},
+					Rules: []monitoringv1alpha1.RuleSpec{
+						{Type: monitoringv1alpha1.RuleOOMKill},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("cleaning up policy and pod")
+			policy := &monitoringv1alpha1.HealthPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: policyName, Namespace: namespace},
+			}
+			_ = k8sClient.Delete(ctx, policy)
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: namespace},
+			}
+			_ = k8sClient.Delete(ctx, pod)
+		})
+
+		It("should not record a CrashLoop finding even with a crashy pod", func() {
+			By("creating a pod with high RestartCount")
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: namespace,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "app", Image: "busybox"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+				{Name: "app", RestartCount: 7},
+			}
+			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+			reconciler := &HealthPolicyReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: policyName, Namespace: namespace},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &monitoringv1alpha1.HealthPolicy{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: policyName, Namespace: namespace}, updated)).To(Succeed())
+
+			Expect(updated.Status.Findings).To(BeEmpty())
+		})
+	})
 })
