@@ -203,6 +203,22 @@ func (r *HealthPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
+	// Count findings per rule type for metrics
+	findingCountByRule := make(map[monitoringv1alpha1.RuleType]int)
+
+	for _, f := range findings {
+		findingCountByRule[f.RuleType]++
+	}
+
+	for _, rule := range policy.Spec.Rules {
+		count := findingCountByRule[rule.Type] // 0 if absent
+		findingsGauge.WithLabelValues(
+			policy.Name,
+			policy.Namespace,
+			string(rule.Type),
+		).Set(float64(count))
+	}
+
 	policy.Status.Findings = findings
 
 	// SetStatusCondition mutates the conditions slice in memory; it does
